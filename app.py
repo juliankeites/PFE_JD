@@ -16,12 +16,12 @@ st.markdown("---")
 if 'results' not in st.session_state:
     st.session_state.results = None
 
-# Sidebar - SIMPLIFIED inputs
+# Sidebar - FULL CONTROLS
 st.sidebar.header("📊 Simulation Parameters")
 
-months = st.sidebar.slider("Swap Months", 1, 24, 6)
-quick_mode = st.sidebar.checkbox("⚡ Quick Mode (500 paths)", value=True)
-num_paths = 500 if quick_mode else st.sidebar.slider("MC Paths", 1000, 3000, 1500, 250)
+months = st.sidebar.slider("Swap Months", 1, 24, 12)
+quick_mode = st.sidebar.checkbox("⚡ Quick Mode (500 paths)", value=False)
+num_paths = 500 if quick_mode else st.sidebar.slider("MC Paths", 1000, 10000, 5000, 500)
 
 st.sidebar.subheader("📈 Monthly Volumes (MT)")
 volumes = []
@@ -30,21 +30,20 @@ for i in range(months):
     vol = st.sidebar.number_input(f"M{i+1}", 0.0, 50000.0, default_vol, key=f"vol_{i}")
     volumes.append(vol)
 
-volatility = st.sidebar.slider("Volatility", 0.10, 1.00, 0.30, 0.01)
+# ✅ 3 DECIMAL VOLATILITY
+volatility = st.sidebar.number_input("Volatility", 0.100, 1.000, 0.300, format="%.3f")
+
 spot_price = st.sidebar.number_input("Spot ($/bbl)", 50.0, 150.0, 80.0)
 fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 50.0, 150.0, 80.0)
 
-st.sidebar.subheader("⚡ Jump-Diffusion")
-use_defaults = st.sidebar.checkbox("Use Defaults", value=True)
-if use_defaults:
-    lambda_jump, mean_jump, std_jump = 0.8, 0.0, 0.20
-else:
-    lambda_jump = st.sidebar.number_input("Lambda", 0.0, 5.0, 0.8)
-    mean_jump = st.sidebar.number_input("Mean Jump", -1.0, 1.0, 0.0)
-    std_jump = st.sidebar.number_input("Jump Std", 0.0, 1.0, 0.20)
+# ✅ FULL JUMP-DIFFUSION INPUTS
+st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
+lambda_jump = st.sidebar.number_input("Lambda (Intensity)", 0.0, 5.0, 0.8, format="%.3f")
+mean_jump = st.sidebar.number_input("Mean Jump Size", -1.0, 1.0, 0.0, format="%.3f")
+std_jump = st.sidebar.number_input("Jump Std Dev", 0.0, 1.0, 0.20, format="%.3f")
 
-drift_rate = st.sidebar.number_input("Drift", 0.0, 0.10, 0.03)
-risk_free = st.sidebar.number_input("Risk Free", 0.0, 0.10, 0.02)
+drift_rate = st.sidebar.number_input("Drift Rate", 0.0, 0.10, 0.03, format="%.3f")
+risk_free = st.sidebar.number_input("Risk Free Rate", 0.0, 0.10, 0.02, format="%.3f")
 
 # Constants
 FIXED_PRICES = np.full(months, fixed_price)
@@ -57,7 +56,7 @@ DAILY_TIMESTEP = 1 / BUSINESS_DAYS_PER_YEAR
 STRIP_LENGTH_YEARS = months / 12.0
 SIMULATION_STEPS = int(BUSINESS_DAYS_PER_YEAR * STRIP_LENGTH_YEARS + 1)
 time_points = np.linspace(0, STRIP_LENGTH_YEARS + DAILY_TIMESTEP, SIMULATION_STEPS + 1)
-time_days = time_points * BUSINESS_DAYS_PER_YEAR  # Years to business days
+time_days = time_points * BUSINESS_DAYS_PER_YEAR
 
 # Reliable button + progress
 if st.sidebar.button("🚀 Run Simulation", type="primary", key="run_btn", use_container_width=True):
@@ -168,7 +167,7 @@ if st.session_state.results is not None:
     
     st.markdown("---")
     
-    # ✅ GRAPH 1: AUTO-SCALED Y-AXIS
+    # ✅ GRAPH 1: AUTO-SCALED (unchanged - working)
     fig1, ax1 = plt.subplots(figsize=(16, 6))
     ax1.plot(results['time_days'], results['pfe_99']/1e6, 'r-', lw=3, label='PFE 99%')
     ax1.plot(results['time_days'], results['pfe_95']/1e6, 'orange', ls='--', lw=2.5, label='PFE 95%')
@@ -177,10 +176,6 @@ if st.session_state.results is not None:
     ax1.plot(results['time_days'], results['neg_95']/1e6, 'lightgreen', ls='--', lw=2.5, label='Liability 95%')
     ax1.axhline(0, color='k', ls='-', alpha=0.5)
     
-    ax1.set_title('Oil Strip Two-Sided Exposure Profile (Daily)', fontsize=16, fontweight='bold', pad=20)
-    ax1.set_xlabel('Business Days')
-    
-    # ✅ AUTO-SCALE Y-AXIS TO DATA + REAL FORMATTING
     all_y = np.concatenate([
         results['pfe_99']/1e6, results['pfe_95']/1e6, results['ee']/1e6,
         results['neg_99']/1e6, results['neg_95']/1e6
@@ -188,31 +183,39 @@ if st.session_state.results is not None:
     y_min, y_max = np.min(all_y), np.max(all_y)
     y_padding = (y_max - y_min) * 0.1
     ax1.set_ylim(y_min - y_padding, y_max + y_padding)
-    ax1.set_ylabel('Exposure/Liability ($ Millions)')
     
+    ax1.set_title('Oil Strip Two-Sided Exposure Profile (Daily)', fontsize=16, fontweight='bold', pad=20)
+    ax1.set_xlabel('Business Days')
+    ax1.set_ylabel('Exposure/Liability ($ Millions)')
     ax1.ticklabel_format(style='plain', axis='y')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     st.pyplot(fig1)
     
-    # ✅ GRAPH 2: AUTO-SCALED Y-AXIS
+    # ✅ GRAPH 2: FIXED AUTOSCALING - Include ALL relevant data
     fig2, ax2 = plt.subplots(figsize=(16, 6))
+    
+    # Plot sample paths FIRST
     for i in range(results['samples'].shape[1]):
         ax2.plot(results['time_days'], results['samples'][:,i]/1e6, 'gray', alpha=0.4, lw=1)
-    ax2.plot(results['time_days'], results['neg_99']/1e6, 'darkred', lw=4, label='1% Centile')
-    ax2.plot(results['time_days'], results['neg_95']/1e6, 'red', ls='--', lw=3, label='5% Centile')
+    
+    # Plot centiles LAST (on top)
+    ax2.plot(results['time_days'], results['neg_99']/1e6, 'darkred', lw=4, label='1% Centile (99% Liability)')
+    ax2.plot(results['time_days'], results['neg_95']/1e6, 'red', ls='--', lw=3, label='5% Centile (95% Liability)')
     ax2.axhline(0, color='k', ls='-', alpha=0.5)
+    
+    # ✅ FIXED: Auto-scale using ALL data (paths + centiles)
+    all_path_data = np.concatenate([
+        results['samples'].flatten()/1e6,      # All sample paths
+        results['neg_99']/1e6, results['neg_95']/1e6  # Centiles
+    ])
+    path_y_min, path_y_max = np.min(all_path_data), np.max(all_path_data)
+    path_padding = (path_y_max - path_y_min) * 0.05
+    ax2.set_ylim(path_y_min - path_padding, path_y_max + path_padding)
     
     ax2.set_title('Monte Carlo Paths + Liability Centiles (Daily)', fontsize=16, fontweight='bold')
     ax2.set_xlabel('Business Days')
-    
-    # ✅ AUTO-SCALE Y-AXIS FOR PATHS
-    path_y = results['samples'].flatten() / 1e6
-    path_y_min, path_y_max = np.min(path_y), np.max(path_y)
-    path_padding = (path_y_max - path_y_min) * 0.05
-    ax2.set_ylim(path_y_min - path_padding, path_y_max + path_padding)
     ax2.set_ylabel('Mark-to-Market ($ Millions)')
-    
     ax2.ticklabel_format(style='plain', axis='y')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
@@ -230,7 +233,7 @@ if st.session_state.results is not None:
     st.download_button("📥 Download CSV", df.to_csv(index=False), "oil_pfe_results.csv")
 
 else:
-    st.info("🚀 **Click 'Run Simulation'** - Quick Mode = 15-30s | Full = 45-90s (Daily calculation)")
+    st.info("🚀 **Click 'Run Simulation'** - Quick=15-30s | 5000 paths=2-4min | 10K paths=4-8min")
 
 st.markdown("---")
-st.caption("✅ Auto-scaled Y-axes | Business Days | $Millions (no scientific notation)")
+st.caption("✅ FIXED MC paths autoscaling | 10K paths | 3-dec vol | Full Jump-Diffusion")
