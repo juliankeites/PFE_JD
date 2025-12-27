@@ -57,8 +57,6 @@ DAILY_TIMESTEP = 1 / BUSINESS_DAYS_PER_YEAR
 STRIP_LENGTH_YEARS = months / 12.0
 SIMULATION_STEPS = int(BUSINESS_DAYS_PER_YEAR * STRIP_LENGTH_YEARS + 1)
 time_points = np.linspace(0, STRIP_LENGTH_YEARS + DAILY_TIMESTEP, SIMULATION_STEPS + 1)
-
-# ✅ Convert time_points to DAYS for plotting
 time_days = time_points * BUSINESS_DAYS_PER_YEAR  # Years to business days
 
 # Reliable button + progress
@@ -144,7 +142,7 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", key="run_btn", use_c
         
         return {
             'time': time_pts,
-            'time_days': time_days,  # ✅ Add days for plotting
+            'time_days': time_days,
             'pfe_99': pfe_99, 'pfe_95': pfe_95, 'ee': ee,
             'neg_99': neg_99, 'neg_95': neg_95,
             'samples': PV_paths[:, :min(10, paths)]
@@ -170,7 +168,7 @@ if st.session_state.results is not None:
     
     st.markdown("---")
     
-    # ✅ GRAPH 1: DAYS + REAL NUMBERS
+    # ✅ GRAPH 1: AUTO-SCALED Y-AXIS
     fig1, ax1 = plt.subplots(figsize=(16, 6))
     ax1.plot(results['time_days'], results['pfe_99']/1e6, 'r-', lw=3, label='PFE 99%')
     ax1.plot(results['time_days'], results['pfe_95']/1e6, 'orange', ls='--', lw=2.5, label='PFE 95%')
@@ -178,35 +176,46 @@ if st.session_state.results is not None:
     ax1.plot(results['time_days'], results['neg_99']/1e6, 'darkgreen', lw=3, label='Liability 99%')
     ax1.plot(results['time_days'], results['neg_95']/1e6, 'lightgreen', ls='--', lw=2.5, label='Liability 95%')
     ax1.axhline(0, color='k', ls='-', alpha=0.5)
+    
     ax1.set_title('Oil Strip Two-Sided Exposure Profile (Daily)', fontsize=16, fontweight='bold', pad=20)
     ax1.set_xlabel('Business Days')
-    ax1.set_ylabel('Exposure/Liability ($ Millions)')  # ✅ Real numbers
+    
+    # ✅ AUTO-SCALE Y-AXIS TO DATA + REAL FORMATTING
+    all_y = np.concatenate([
+        results['pfe_99']/1e6, results['pfe_95']/1e6, results['ee']/1e6,
+        results['neg_99']/1e6, results['neg_95']/1e6
+    ])
+    y_min, y_max = np.min(all_y), np.max(all_y)
+    y_padding = (y_max - y_min) * 0.1
+    ax1.set_ylim(y_min - y_padding, y_max + y_padding)
+    ax1.set_ylabel('Exposure/Liability ($ Millions)')
+    
+    ax1.ticklabel_format(style='plain', axis='y')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
-    
-    # ✅ NO SCIENTIFIC NOTATION + REAL NUMBERS
-    ax1.ticklabel_format(style='plain', axis='y')
-    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:.1f}'))
-    
     st.pyplot(fig1)
     
-    # ✅ GRAPH 2: DAYS + REAL NUMBERS
+    # ✅ GRAPH 2: AUTO-SCALED Y-AXIS
     fig2, ax2 = plt.subplots(figsize=(16, 6))
     for i in range(results['samples'].shape[1]):
         ax2.plot(results['time_days'], results['samples'][:,i]/1e6, 'gray', alpha=0.4, lw=1)
     ax2.plot(results['time_days'], results['neg_99']/1e6, 'darkred', lw=4, label='1% Centile')
     ax2.plot(results['time_days'], results['neg_95']/1e6, 'red', ls='--', lw=3, label='5% Centile')
     ax2.axhline(0, color='k', ls='-', alpha=0.5)
+    
     ax2.set_title('Monte Carlo Paths + Liability Centiles (Daily)', fontsize=16, fontweight='bold')
     ax2.set_xlabel('Business Days')
-    ax2.set_ylabel('Mark-to-Market ($ Millions)')  # ✅ Real numbers
+    
+    # ✅ AUTO-SCALE Y-AXIS FOR PATHS
+    path_y = results['samples'].flatten() / 1e6
+    path_y_min, path_y_max = np.min(path_y), np.max(path_y)
+    path_padding = (path_y_max - path_y_min) * 0.05
+    ax2.set_ylim(path_y_min - path_padding, path_y_max + path_padding)
+    ax2.set_ylabel('Mark-to-Market ($ Millions)')
+    
+    ax2.ticklabel_format(style='plain', axis='y')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
-    
-    # ✅ NO SCIENTIFIC NOTATION
-    ax2.ticklabel_format(style='plain', axis='y')
-    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:.1f}'))
-    
     st.pyplot(fig2)
     
     df = pd.DataFrame({
@@ -224,4 +233,4 @@ else:
     st.info("🚀 **Click 'Run Simulation'** - Quick Mode = 15-30s | Full = 45-90s (Daily calculation)")
 
 st.markdown("---")
-st.caption("✅ Daily timesteps | X-axis=Business Days | Y-axis=$Millions (no scientific notation)")
+st.caption("✅ Auto-scaled Y-axes | Business Days | $Millions (no scientific notation)")
