@@ -64,8 +64,8 @@ lambda_jump = st.sidebar.number_input("Lambda (Intensity)", 0.000, 5.000, 0.800,
 mean_jump = st.sidebar.number_input("Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f")
 std_jump = st.sidebar.number_input("Jump Std Dev", 0.000, 2.000, 0.200, format="%.3f")
 
-drift_rate = st.sidebar.number_input("Drift Rate μ", -0.200, 0.200, 0.030, format="%.3f")
-risk_free = st.sidebar.number_input("Risk-Free Rate r", -0.200, 0.200, 0.020, format="%.3f")
+drift_rate = st.sidebar.number_input("Drift Rate μ", -0.200, 0.200, 0.000, format="%.3f")
+risk_free = st.sidebar.number_input("Risk-Free Rate r", -0.200, 0.200, 0.00, format="%.3f")
 
 # -------------------------------------------------------------
 # Contract / time grid / settlement profile
