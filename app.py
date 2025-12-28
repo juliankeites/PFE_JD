@@ -490,8 +490,17 @@ if st.session_state.results is not None:
     st.pyplot(fig2)
 
     # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
-    S_paths = results["S_paths"]  # shape (T+1, N_paths)
-    T_plus_1, Np = S_paths.shape
+    S_paths = results["S_paths"]  # shape (T_strip+1, N_paths)
+
+    # Build a matching time axis from the strip simulation
+    T_strip_plus_1 = S_paths.shape[0]
+    time_days_strip = np.linspace(
+        0,
+        STRIP_LENGTH_YEARS + DAILY_TIMESTEP,
+        T_strip_plus_1
+    ) * BUSINESS_DAYS_PER_YEAR
+
+    Np = S_paths.shape[1]
     sample_count = min(100, Np)
     rng = np.random.default_rng(123)
     sample_indices = rng.choice(Np, size=sample_count, replace=False)
@@ -504,15 +513,17 @@ if st.session_state.results is not None:
     fig3, ax3 = plt.subplots(figsize=(16, 6))
     # Light grey sample paths
     for i in range(sample_count):
-        ax3.plot(time_days, S_samples[:, i], color="gray", alpha=0.25, lw=0.8)
+        ax3.plot(time_days_strip, S_samples[:, i], color="gray", alpha=0.25, lw=0.8)
 
     # Min / max / mean bands
-    ax3.plot(time_days, S_min, color="black", lw=1.0, ls="--", label="Min path")
-    ax3.plot(time_days, S_max, color="black", lw=1.0, ls="--", label="Max path")
-    ax3.plot(time_days, S_mean, color="blue", lw=2.0, label="Average path")
+    ax3.plot(time_days_strip, S_min, color="black", lw=1.0, ls="--", label="Min path")
+    ax3.plot(time_days_strip, S_max, color="black", lw=1.0, ls="--", label="Max path")
+    ax3.plot(time_days_strip, S_mean, color="blue", lw=2.0, label="Average path")
 
     ax3.set_title(
-        "Monte Carlo Price Paths (Sample of 100) with Min / Max / Mean", fontsize=16, fontweight="bold"
+        "Monte Carlo Price Paths (Sample of 100) with Min / Max / Mean",
+        fontsize=16,
+        fontweight="bold",
     )
     ax3.set_xlabel("Business Days")
     ax3.set_ylabel("Price (USD/bbl)")
@@ -521,6 +532,7 @@ if st.session_state.results is not None:
     ax3.legend()
     st.pyplot(fig3)
 
+    
     # CSV download (exposure stats)
     df = pd.DataFrame(
         {
