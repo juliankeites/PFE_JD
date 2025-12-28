@@ -22,9 +22,9 @@ st.markdown("---")
 # -------------------------------------------------------------
 # Session state
 # -------------------------------------------------------------
-if 'results' not in st.session_state:
+if "results" not in st.session_state:
     st.session_state.results = None
-if 'margin_clip' not in st.session_state:
+if "margin_clip" not in st.session_state:
     st.session_state.margin_clip = None
 
 # -------------------------------------------------------------
@@ -46,12 +46,14 @@ for i in range(months):
         min_value=0.0,
         max_value=50000.0,
         value=default_vol,
-        key=f"vol_{i}"
+        key=f"vol_{i}",
     )
     volumes.append(vol)
 
 # Volatility with 3 decimal places
-volatility = st.sidebar.number_input("Volatility σ (annual)", 0.001, 5.000, 0.300, format="%.3f")
+volatility = st.sidebar.number_input(
+    "Volatility σ (annual)", 0.001, 5.000, 0.300, format="%.3f"
+)
 
 spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 80.0)
 fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 80.0)
@@ -60,12 +62,22 @@ st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
 
 use_jumps = st.sidebar.checkbox("Enable Jump-Diffusion", value=True)
 
-lambda_jump = st.sidebar.number_input("Lambda (Intensity)", 0.000, 5.000, 0.800, format="%.3f")
-mean_jump = st.sidebar.number_input("Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f")
-std_jump = st.sidebar.number_input("Jump Std Dev", 0.000, 2.000, 0.200, format="%.3f")
+lambda_jump = st.sidebar.number_input(
+    "Lambda (Intensity)", 0.000, 5.000, 0.800, format="%.3f"
+)
+mean_jump = st.sidebar.number_input(
+    "Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f"
+)
+std_jump = st.sidebar.number_input(
+    "Jump Std Dev", 0.000, 2.000, 0.200, format="%.3f"
+)
 
-drift_rate = st.sidebar.number_input("Drift Rate μ", -0.200, 0.200, 0.000, format="%.3f")
-risk_free = st.sidebar.number_input("Risk-Free Rate r", -0.200, 0.200, 0.00, format="%.3f")
+drift_rate = st.sidebar.number_input(
+    "Drift Rate μ", -0.200, 0.200, 0.030, format="%.3f"
+)
+risk_free = st.sidebar.number_input(
+    "Risk-Free Rate r", -0.200, 0.200, 0.020, format="%.3f"
+)
 
 # -------------------------------------------------------------
 # Contract / time grid / settlement profile
@@ -88,7 +100,7 @@ SETTLEMENT_WINDOW_DAYS = 5
 SETTLEMENT_WINDOW_STEPS = int(SETTLEMENT_WINDOW_DAYS)
 
 # -------------------------------------------------------------
-# Core engine: daily jump-diffusion swap PVs
+# Core engine: daily jump-diffusion price & strip PVs
 # -------------------------------------------------------------
 def simulate_strip(
     months,
@@ -103,11 +115,11 @@ def simulate_strip(
     sigma_j,
     use_jumps,
     paths,
-    time_pts
+    time_pts,
 ):
     """
     Simulates daily price paths and strip PVs for a multi-month monthly-average swap
-    with a short settlement window and returns PFE statistics and PV paths.
+    with a short settlement window and returns PFE statistics, PV paths, and price paths.
     """
     M = len(time_pts) - 1
     S = np.full((M + 1, paths), s0)
@@ -228,6 +240,7 @@ def simulate_strip(
         "neg_99": neg_99,
         "neg_95": neg_95,
         "PV_paths": PV_paths,
+        "S_paths": S,
     }
 
 # -------------------------------------------------------------
@@ -243,25 +256,20 @@ def margin_for_1k_bbl_clip(
     sigma_j,
     use_jumps,
     paths,
-    fixed_price_clip
+    fixed_price_clip,
 ):
     """
     Run the same model for a single‑month swap with exactly 1,000 bbl notional
     and return the 2‑day PFE99 in USD as the margin per 1,000 bbl.
     """
-    # Single-month grid (1 month)
     clip_months = 1
     clip_length_years = 1.0 / 12.0
     steps = int(BUSINESS_DAYS_PER_YEAR * clip_length_years + 1)
     t_grid = np.linspace(0, clip_length_years + DAILY_TIMESTEP, steps + 1)
-    t_days = t_grid * BUSINESS_DAYS_PER_YEAR
 
-    # 1,000 bbl in MT
-    mt_for_1000_bbl = 1000.0 / BBL_PER_MT
-    notionals_clip = np.array([1000.0])  # directly 1000 bbl notional
+    notionals_clip = np.array([1000.0])  # 1,000 bbl notional
     fixed_prices_clip = np.array([fixed_price_clip])
 
-    # Re‑use simulate_strip over 1 month
     res_clip = simulate_strip(
         clip_months,
         notionals_clip,
@@ -281,7 +289,6 @@ def margin_for_1k_bbl_clip(
     exposure_clip = np.maximum(0.0, res_clip["PV_paths"])
     pfe99_clip = np.percentile(exposure_clip, 99, axis=1)
 
-    # 2‑business‑day index (t ≈ 2 days)
     day2 = 2
     idx2 = min(day2, len(pfe99_clip) - 1)
     margin_2d_per_1000 = pfe99_clip[idx2]  # USD per 1,000 bbl
@@ -291,7 +298,9 @@ def margin_for_1k_bbl_clip(
 # -------------------------------------------------------------
 # Run button
 # -------------------------------------------------------------
-if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=True, key="run_btn"):
+if st.sidebar.button(
+    "🚀 Run Simulation", type="primary", use_container_width=True, key="run_btn"
+):
     st.session_state.results = None
     st.session_state.margin_clip = None
 
@@ -326,7 +335,8 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
         "ee": res["ee"],
         "neg_99": res["neg_99"],
         "neg_95": res["neg_95"],
-        "samples": res["PV_paths"][:, : min(10, num_paths)],
+        "samples_PV": res["PV_paths"][:, : min(10, num_paths)],
+        "S_paths": res["S_paths"],
     }
 
     progress_bar.progress(60)
@@ -357,7 +367,9 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
 # -------------------------------------------------------------
 if st.session_state.results is not None:
     results = st.session_state.results
-    margin_clip = st.session_state.margin_clip if st.session_state.margin_clip is not None else 0.0
+    margin_clip = (
+        st.session_state.margin_clip if st.session_state.margin_clip is not None else 0.0
+    )
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -367,7 +379,9 @@ if st.session_state.results is not None:
     with col3:
         st.metric("Max EE", f"${np.max(results['ee']) / 1e6:.3f}M")
     with col4:
-        st.metric("Max Liability (99%)", f"${np.abs(np.min(results['neg_99'])) / 1e6:.3f}M")
+        st.metric(
+            "Max Liability (99%)", f"${np.abs(np.min(results['neg_99'])) / 1e6:.3f}M"
+        )
     with col5:
         st.metric("2‑Day Margin / 1k bbl (PFE99 at 2d)", f"${margin_clip:,.2f}")
 
@@ -376,10 +390,30 @@ if st.session_state.results is not None:
     # -------- Graph 1: Exposure profile --------
     fig1, ax1 = plt.subplots(figsize=(16, 6))
     ax1.plot(results["time_days"], results["pfe_99"] / 1e6, "r-", lw=3, label="PFE 99%")
-    ax1.plot(results["time_days"], results["pfe_95"] / 1e6, "orange", ls="--", lw=2.5, label="PFE 95%")
+    ax1.plot(
+        results["time_days"],
+        results["pfe_95"] / 1e6,
+        "orange",
+        ls="--",
+        lw=2.5,
+        label="PFE 95%",
+    )
     ax1.plot(results["time_days"], results["ee"] / 1e6, "b-", lw=2.5, label="Expected Exposure")
-    ax1.plot(results["time_days"], results["neg_99"] / 1e6, "darkgreen", lw=3, label="Liability 99%")
-    ax1.plot(results["time_days"], results["neg_95"] / 1e6, "lightgreen", ls="--", lw=2.5, label="Liability 95%")
+    ax1.plot(
+        results["time_days"],
+        results["neg_99"] / 1e6,
+        "darkgreen",
+        lw=3,
+        label="Liability 99%",
+    )
+    ax1.plot(
+        results["time_days"],
+        results["neg_95"] / 1e6,
+        "lightgreen",
+        ls="--",
+        lw=2.5,
+        label="Liability 95%",
+    )
     ax1.axhline(0, color="k", ls="-", alpha=0.5)
 
     all_y = np.concatenate(
@@ -395,7 +429,9 @@ if st.session_state.results is not None:
     y_pad = (y_max - y_min) * 0.1 if y_max > y_min else 0.001
     ax1.set_ylim(y_min - y_pad, y_max + y_pad)
 
-    ax1.set_title("Oil Strip Two-Sided Exposure Profile (Daily)", fontsize=16, fontweight="bold", pad=20)
+    ax1.set_title(
+        "Oil Strip Two-Sided Exposure Profile (Daily)", fontsize=16, fontweight="bold", pad=20
+    )
     ax1.set_xlabel("Business Days")
     ax1.set_ylabel("Exposure / Liability ($ Millions)")
     ax1.ticklabel_format(style="plain", axis="y")
@@ -403,19 +439,38 @@ if st.session_state.results is not None:
     ax1.legend()
     st.pyplot(fig1)
 
-    # -------- Graph 2: MC paths + liability centiles --------
+    # -------- Graph 2: MC PV paths + liability centiles --------
     fig2, ax2 = plt.subplots(figsize=(16, 6))
 
-    for i in range(results["samples"].shape[1]):
-        ax2.plot(results["time_days"], results["samples"][:, i] / 1e6, color="gray", alpha=0.4, lw=1)
+    for i in range(results["samples_PV"].shape[1]):
+        ax2.plot(
+            results["time_days"],
+            results["samples_PV"][:, i] / 1e6,
+            color="gray",
+            alpha=0.4,
+            lw=1,
+        )
 
-    ax2.plot(results["time_days"], results["neg_99"] / 1e6, "darkred", lw=4, label="1% Centile (99% Liability)")
-    ax2.plot(results["time_days"], results["neg_95"] / 1e6, "red", ls="--", lw=3, label="5% Centile (95% Liability)")
+    ax2.plot(
+        results["time_days"],
+        results["neg_99"] / 1e6,
+        "darkred",
+        lw=4,
+        label="1% Centile (99% Liability)",
+    )
+    ax2.plot(
+        results["time_days"],
+        results["neg_95"] / 1e6,
+        "red",
+        ls="--",
+        lw=3,
+        label="5% Centile (95% Liability)",
+    )
     ax2.axhline(0, color="k", ls="-", alpha=0.5)
 
     all_paths = np.concatenate(
         [
-            results["samples"].flatten() / 1e6,
+            results["samples_PV"].flatten() / 1e6,
             results["neg_99"] / 1e6,
             results["neg_95"] / 1e6,
         ]
@@ -424,7 +479,9 @@ if st.session_state.results is not None:
     py_pad = (py_max - py_min) * 0.05 if py_max > py_min else 0.001
     ax2.set_ylim(py_min - py_pad, py_max + py_pad)
 
-    ax2.set_title("Monte Carlo Paths + Liability Centiles (Daily)", fontsize=16, fontweight="bold")
+    ax2.set_title(
+        "Monte Carlo PV Paths + Liability Centiles (Daily)", fontsize=16, fontweight="bold"
+    )
     ax2.set_xlabel("Business Days")
     ax2.set_ylabel("Mark-to-Market ($ Millions)")
     ax2.ticklabel_format(style="plain", axis="y")
@@ -432,6 +489,39 @@ if st.session_state.results is not None:
     ax2.legend()
     st.pyplot(fig2)
 
+    # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
+    S_paths = results["S_paths"]  # shape (T+1, N_paths)
+    T_plus_1, Np = S_paths.shape
+    sample_count = min(100, Np)
+    rng = np.random.default_rng(123)
+    sample_indices = rng.choice(Np, size=sample_count, replace=False)
+
+    S_samples = S_paths[:, sample_indices]
+    S_min = np.min(S_paths, axis=1)
+    S_max = np.max(S_paths, axis=1)
+    S_mean = np.mean(S_paths, axis=1)
+
+    fig3, ax3 = plt.subplots(figsize=(16, 6))
+    # Light grey sample paths
+    for i in range(sample_count):
+        ax3.plot(time_days, S_samples[:, i], color="gray", alpha=0.25, lw=0.8)
+
+    # Min / max / mean bands
+    ax3.plot(time_days, S_min, color="black", lw=1.0, ls="--", label="Min path")
+    ax3.plot(time_days, S_max, color="black", lw=1.0, ls="--", label="Max path")
+    ax3.plot(time_days, S_mean, color="blue", lw=2.0, label="Average path")
+
+    ax3.set_title(
+        "Monte Carlo Price Paths (Sample of 100) with Min / Max / Mean", fontsize=16, fontweight="bold"
+    )
+    ax3.set_xlabel("Business Days")
+    ax3.set_ylabel("Price (USD/bbl)")
+    ax3.grid(True, alpha=0.3)
+    ax3.ticklabel_format(style="plain", axis="y")
+    ax3.legend()
+    st.pyplot(fig3)
+
+    # CSV download (exposure stats)
     df = pd.DataFrame(
         {
             "Business_Days": results["time_days"],
@@ -443,7 +533,10 @@ if st.session_state.results is not None:
             "NegPFE_95_M": results["neg_95"] / 1e6,
         }
     )
-    st.download_button("📥 Download CSV", df.to_csv(index=False), "oil_pfe_results.csv")
+    st.download_button("📥 Download Exposure CSV", df.to_csv(index=False), "oil_pfe_results.csv")
 
 else:
-    st.info("🚀 Set parameters and click **Run Simulation** to generate strip PFE and 2‑day margin per 1,000 bbl.")
+    st.info(
+        "🚀 Set parameters and click **Run Simulation** to generate strip PFE, "
+        "1,000‑bbl 2‑day margin, and Monte Carlo price paths."
+    )
