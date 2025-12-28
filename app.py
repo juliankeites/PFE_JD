@@ -10,7 +10,7 @@ import time
 # Streamlit page config
 # -------------------------------------------------------------
 st.set_page_config(
-    page_title="Oil Strip PFE Simulator",
+    page_title="Oil Strip PFE Simulator - J Keites",
     layout="wide",
     initial_sidebar_state="expanded"
 )
