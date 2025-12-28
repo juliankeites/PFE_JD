@@ -24,6 +24,8 @@ st.markdown("---")
 # -------------------------------------------------------------
 if 'results' not in st.session_state:
     st.session_state.results = None
+if 'margin_clip' not in st.session_state:
+    st.session_state.margin_clip = None
 
 # -------------------------------------------------------------
 # Sidebar inputs
@@ -86,9 +88,9 @@ SETTLEMENT_WINDOW_DAYS = 5
 SETTLEMENT_WINDOW_STEPS = int(SETTLEMENT_WINDOW_DAYS)
 
 # -------------------------------------------------------------
-# Monte Carlo engine
+# Core engine: daily jump-diffusion swap PVs
 # -------------------------------------------------------------
-def run_simulation_daily(
+def simulate_strip(
     months,
     notionals,
     fixed_prices,
@@ -103,10 +105,14 @@ def run_simulation_daily(
     paths,
     time_pts
 ):
+    """
+    Simulates daily price paths and strip PVs for a multi-month monthly-average swap
+    with a short settlement window and returns PFE statistics and PV paths.
+    """
     M = len(time_pts) - 1
     S = np.full((M + 1, paths), s0)
 
-    # Drift adjustment (only if jumps enabled and non-zero)
+    # Drift adjustment for jump diffusion (if enabled)
     if lambda_j > 0.0 and sigma_j > 0.0 and use_jumps:
         jump_mean_e = np.exp(mu_j + 0.5 * sigma_j**2) - 1.0
         adj_mu = drift - lambda_j * jump_mean_e
@@ -114,13 +120,8 @@ def run_simulation_daily(
         jump_mean_e = 0.0
         adj_mu = drift
 
-    # -------------------------------
     # 1. Generate daily price paths
-    # -------------------------------
     for t in range(M):
-        if t % 50 == 0:
-            st.session_state._progress = min(10 + int(30 * t / M), 40)
-
         Z = np.random.normal(size=paths)
 
         jump_impact = np.zeros(paths)
@@ -137,15 +138,10 @@ def run_simulation_daily(
             + jump_impact
         )
 
-    # -------------------------------
-    # 2. Pathwise PV of strip (daily)
-    # -------------------------------
+    # 2. Strip PV paths
     PV_paths = np.zeros((M + 1, paths))
 
     for t in range(M + 1):
-        if t % 50 == 0:
-            st.session_state._progress = min(50 + int(40 * t / M), 90)
-
         mtm = np.zeros(paths)
 
         for i in range(months):
@@ -215,38 +211,13 @@ def run_simulation_daily(
 
         PV_paths[t] = mtm
 
-    # -------------------------------
     # 3. Exposure statistics
-    # -------------------------------
     exposure = np.maximum(0.0, PV_paths)
     pfe_95 = np.percentile(exposure, 95, axis=1)
     pfe_99 = np.percentile(exposure, 99, axis=1)
     ee = np.mean(exposure, axis=1)
     neg_95 = np.percentile(PV_paths, 5, axis=1)
     neg_99 = np.percentile(PV_paths, 1, axis=1)
-
-    # -------------------------------
-    # 4. 2‑day margin equivalents per 1,000 bbl
-    # -------------------------------
-    horizon_steps = 2
-    max_step = M - horizon_steps
-
-    pv_today = PV_paths[: max_step + 1, :]
-    pv_future = PV_paths[horizon_steps : M + 1, :]
-
-    pnl_2d = pv_future - pv_today
-
-    long_loss_2d = -pnl_2d
-    long_margin_2d = np.percentile(long_loss_2d, 99, axis=1)
-
-    short_loss_2d = pnl_2d
-    short_margin_2d = np.percentile(short_loss_2d, 99, axis=1)
-
-    strip_notional_bbl = np.sum(notionals)
-    per_1000_scale = 1000.0 / strip_notional_bbl if strip_notional_bbl > 0 else 0.0
-
-    long_margin_2d_per_1000 = long_margin_2d * per_1000_scale
-    short_margin_2d_per_1000 = short_margin_2d * per_1000_scale
 
     return {
         "time": time_pts,
@@ -256,24 +227,82 @@ def run_simulation_daily(
         "ee": ee,
         "neg_99": neg_99,
         "neg_95": neg_95,
-        "samples": PV_paths[:, : min(10, paths)],
-        "long_margin_2d_per_1000": long_margin_2d_per_1000,
-        "short_margin_2d_per_1000": short_margin_2d_per_1000,
+        "PV_paths": PV_paths,
     }
+
+# -------------------------------------------------------------
+# Helper: 2‑day margin for a 1‑month 1,000 bbl clip
+# -------------------------------------------------------------
+def margin_for_1k_bbl_clip(
+    s0,
+    vol,
+    drift,
+    rf,
+    lambda_j,
+    mu_j,
+    sigma_j,
+    use_jumps,
+    paths,
+    fixed_price_clip
+):
+    """
+    Run the same model for a single‑month swap with exactly 1,000 bbl notional
+    and return the 2‑day PFE99 in USD as the margin per 1,000 bbl.
+    """
+    # Single-month grid (1 month)
+    clip_months = 1
+    clip_length_years = 1.0 / 12.0
+    steps = int(BUSINESS_DAYS_PER_YEAR * clip_length_years + 1)
+    t_grid = np.linspace(0, clip_length_years + DAILY_TIMESTEP, steps + 1)
+    t_days = t_grid * BUSINESS_DAYS_PER_YEAR
+
+    # 1,000 bbl in MT
+    mt_for_1000_bbl = 1000.0 / BBL_PER_MT
+    notionals_clip = np.array([1000.0])  # directly 1000 bbl notional
+    fixed_prices_clip = np.array([fixed_price_clip])
+
+    # Re‑use simulate_strip over 1 month
+    res_clip = simulate_strip(
+        clip_months,
+        notionals_clip,
+        fixed_prices_clip,
+        s0,
+        vol,
+        drift,
+        rf,
+        lambda_j,
+        mu_j,
+        sigma_j,
+        use_jumps,
+        paths,
+        t_grid,
+    )
+
+    exposure_clip = np.maximum(0.0, res_clip["PV_paths"])
+    pfe99_clip = np.percentile(exposure_clip, 99, axis=1)
+
+    # 2‑business‑day index (t ≈ 2 days)
+    day2 = 2
+    idx2 = min(day2, len(pfe99_clip) - 1)
+    margin_2d_per_1000 = pfe99_clip[idx2]  # USD per 1,000 bbl
+
+    return margin_2d_per_1000
 
 # -------------------------------------------------------------
 # Run button
 # -------------------------------------------------------------
 if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=True, key="run_btn"):
     st.session_state.results = None
-    st.session_state._progress = 0
+    st.session_state.margin_clip = None
+
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    status_text.text("🎲 Running daily Jump-Diffusion Monte Carlo...")
-    progress_bar.progress(5)
+    status_text.text("🎲 Simulating full strip...")
+    progress_bar.progress(10)
 
-    results = run_simulation_daily(
+    # 1) Full strip simulation
+    res = simulate_strip(
         months,
         NOTIONAL_PER_MONTH,
         FIXED_PRICES,
@@ -288,7 +317,35 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
         num_paths,
         time_points,
     )
-    st.session_state.results = results
+
+    st.session_state.results = {
+        "time": res["time"],
+        "time_days": res["time_days"],
+        "pfe_99": res["pfe_99"],
+        "pfe_95": res["pfe_95"],
+        "ee": res["ee"],
+        "neg_99": res["neg_99"],
+        "neg_95": res["neg_95"],
+        "samples": res["PV_paths"][:, : min(10, num_paths)],
+    }
+
+    progress_bar.progress(60)
+    status_text.text("📐 Calculating 2‑day margin for 1,000 bbl clip...")
+
+    # 2) Single‑month 1,000 bbl clip margin
+    margin_clip = margin_for_1k_bbl_clip(
+        spot_price,
+        volatility,
+        drift_rate,
+        risk_free,
+        lambda_jump,
+        mean_jump,
+        std_jump,
+        use_jumps,
+        num_paths,
+        fixed_price,
+    )
+    st.session_state.margin_clip = margin_clip
 
     progress_bar.progress(100)
     status_text.text("✅ Simulation complete")
@@ -300,11 +357,9 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
 # -------------------------------------------------------------
 if st.session_state.results is not None:
     results = st.session_state.results
+    margin_clip = st.session_state.margin_clip if st.session_state.margin_clip is not None else 0.0
 
-    long_2d = results["long_margin_2d_per_1000"]
-    short_2d = results["short_margin_2d_per_1000"]
-
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Max PFE 99%", f"${np.max(results['pfe_99']) / 1e6:.3f}M")
     with col2:
@@ -314,9 +369,7 @@ if st.session_state.results is not None:
     with col4:
         st.metric("Max Liability (99%)", f"${np.abs(np.min(results['neg_99'])) / 1e6:.3f}M")
     with col5:
-        st.metric("2‑Day Long Margin / 1k bbl", f"${np.max(long_2d):.2f}")
-    with col6:
-        st.metric("2‑Day Short Margin / 1k bbl", f"${np.max(short_2d):.2f}")
+        st.metric("2‑Day Margin / 1k bbl (PFE99 at 2d)", f"${margin_clip:,.2f}")
 
     st.markdown("---")
 
@@ -379,7 +432,6 @@ if st.session_state.results is not None:
     ax2.legend()
     st.pyplot(fig2)
 
-    # CSV download
     df = pd.DataFrame(
         {
             "Business_Days": results["time_days"],
@@ -394,4 +446,4 @@ if st.session_state.results is not None:
     st.download_button("📥 Download CSV", df.to_csv(index=False), "oil_pfe_results.csv")
 
 else:
-    st.info("🚀 Set parameters and click **Run Simulation** to generate daily PFE, MC paths and 2‑day margin per 1,000 bbl.")
+    st.info("🚀 Set parameters and click **Run Simulation** to generate strip PFE and 2‑day margin per 1,000 bbl.")
