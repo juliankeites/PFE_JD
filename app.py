@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import time
 
+# -------------------------------------------------------------
+# Streamlit page config
+# -------------------------------------------------------------
 st.set_page_config(
     page_title="Oil Strip PFE Simulator",
     layout="wide",
@@ -13,18 +16,18 @@ st.set_page_config(
 )
 
 st.title("🛢️ Oil Strip PFE Exposure Simulator")
-st.markdown("**Jump-Diffusion Monte Carlo for Oil Swap Strips (Monthly Average)**")
+st.markdown("**Jump-Diffusion Monte Carlo for Monthly-Average Oil Swaps**")
 st.markdown("---")
 
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 # Session state
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 if 'results' not in st.session_state:
     st.session_state.results = None
 
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 # Sidebar inputs
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 st.sidebar.header("📊 Simulation Parameters")
 
 months = st.sidebar.slider("Swap Months", 1, 24, 12)
@@ -45,26 +48,29 @@ for i in range(months):
     )
     volumes.append(vol)
 
-# Volatility to 3 decimal places
-volatility = st.sidebar.number_input("Volatility (σ, annual)", 0.001, 5.000, 0.300, format="%.3f")
+# Volatility with 3 decimal places
+volatility = st.sidebar.number_input("Volatility σ (annual)", 0.001, 5.000, 0.300, format="%.3f")
 
 spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 80.0)
 fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 80.0)
 
 st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
+
+use_jumps = st.sidebar.checkbox("Enable Jump-Diffusion", value=True)
+
 lambda_jump = st.sidebar.number_input("Lambda (Intensity)", 0.000, 5.000, 0.800, format="%.3f")
 mean_jump = st.sidebar.number_input("Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f")
 std_jump = st.sidebar.number_input("Jump Std Dev", 0.000, 2.000, 0.200, format="%.3f")
 
-drift_rate = st.sidebar.number_input("Drift Rate (μ)", -0.200, 0.200, 0.030, format="%.3f")
-risk_free = st.sidebar.number_input("Risk Free Rate (r)", -0.200, 0.200, 0.020, format="%.3f")
+drift_rate = st.sidebar.number_input("Drift Rate μ", -0.200, 0.200, 0.030, format="%.3f")
+risk_free = st.sidebar.number_input("Risk-Free Rate r", -0.200, 0.200, 0.020, format="%.3f")
 
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 # Contract / time grid / settlement profile
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 FIXED_PRICES = np.full(months, fixed_price)
 BBL_PER_MT = 7.88
-NOTIONAL_PER_MONTH = np.array(volumes) * BBL_PER_MT
+NOTIONAL_PER_MONTH = np.array(volumes) * BBL_PER_MT  # bbl per month
 
 BUSINESS_DAYS_PER_YEAR = 252
 DAYS_PER_MONTH = BUSINESS_DAYS_PER_YEAR / 12
@@ -73,179 +79,199 @@ STRIP_LENGTH_YEARS = months / 12.0
 
 SIMULATION_STEPS = int(BUSINESS_DAYS_PER_YEAR * STRIP_LENGTH_YEARS + 1)
 time_points = np.linspace(0, STRIP_LENGTH_YEARS + DAILY_TIMESTEP, SIMULATION_STEPS + 1)
-time_days = time_points * BUSINESS_DAYS_PER_YEAR  # for plotting on x‑axis
+time_days = time_points * BUSINESS_DAYS_PER_YEAR  # x-axis in business days
 
-# Settlement window: e.g. 5 business days to pay the month’s cashflow
+# Settlement window: 5 business days after averaging
 SETTLEMENT_WINDOW_DAYS = 5
 SETTLEMENT_WINDOW_STEPS = int(SETTLEMENT_WINDOW_DAYS)
 
-# ------------------------------------------------------------------
-# Simulation on button click
-# ------------------------------------------------------------------
-if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=True, key="run_btn"):
-    st.session_state.results = None
+# -------------------------------------------------------------
+# Monte Carlo engine
+# -------------------------------------------------------------
+def run_simulation_daily(
+    months,
+    notionals,
+    fixed_prices,
+    s0,
+    vol,
+    drift,
+    rf,
+    lambda_j,
+    mu_j,
+    sigma_j,
+    use_jumps,
+    paths,
+    time_pts
+):
+    M = len(time_pts) - 1
+    S = np.full((M + 1, paths), s0)
 
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    status_text.text("🎲 Generating daily price paths...")
-
-    def run_simulation_daily(
-        months,
-        notionals,
-        fixed_prices,
-        s0,
-        vol,
-        drift,
-        rf,
-        lambda_j,
-        mu_j,
-        sigma_j,
-        paths,
-        time_pts
-    ):
-        M = len(time_pts) - 1
-        S = np.full((M + 1, paths), s0)
-
-        # Jump‑diffusion drift adjustment
+    # Drift adjustment (only if jumps enabled and non-zero)
+    if lambda_j > 0.0 and sigma_j > 0.0 and use_jumps:
         jump_mean_e = np.exp(mu_j + 0.5 * sigma_j**2) - 1.0
         adj_mu = drift - lambda_j * jump_mean_e
+    else:
+        jump_mean_e = 0.0
+        adj_mu = drift
 
-        # -------------------------------
-        # 1. Generate daily price paths
-        # -------------------------------
-        for t in range(M):
-            if t % 50 == 0:
-                progress_bar.progress(min(10 + int(30 * t / M), 40))
+    # -------------------------------
+    # 1. Generate daily price paths
+    # -------------------------------
+    for t in range(M):
+        if t % 50 == 0:
+            st.session_state._progress = min(10 + int(30 * t / M), 40)
 
-            Z = np.random.normal(size=paths)
+        Z = np.random.normal(size=paths)
+
+        jump_impact = np.zeros(paths)
+        if lambda_j > 0.0 and sigma_j > 0.0 and use_jumps:
             N_jumps = np.random.poisson(lambda_j * DAILY_TIMESTEP, size=paths)
-
-            jump_impact = np.zeros(paths)
             for i in range(paths):
                 if N_jumps[i] > 0:
                     jumps = np.random.normal(mu_j, sigma_j, N_jumps[i])
                     jump_impact[i] = np.sum(jumps)
 
-            S[t + 1] = S[t] * np.exp(
-                (adj_mu - 0.5 * vol**2) * DAILY_TIMESTEP
-                + vol * np.sqrt(DAILY_TIMESTEP) * Z
-                + jump_impact
-            )
+        S[t + 1] = S[t] * np.exp(
+            (adj_mu - 0.5 * vol**2) * DAILY_TIMESTEP
+            + vol * np.sqrt(DAILY_TIMESTEP) * Z
+            + jump_impact
+        )
 
-        # -------------------------------
-        # 2. Pathwise PV of strip (daily)
-        # -------------------------------
-        status_text.text("📊 Calculating daily exposures...")
-        progress_bar.progress(50)
+    # -------------------------------
+    # 2. Pathwise PV of strip (daily)
+    # -------------------------------
+    PV_paths = np.zeros((M + 1, paths))
 
-        PV_paths = np.zeros((M + 1, paths))
+    for t in range(M + 1):
+        if t % 50 == 0:
+            st.session_state._progress = min(50 + int(40 * t / M), 90)
 
-        for t in range(M + 1):
-            mtm = np.zeros(paths)
+        mtm = np.zeros(paths)
 
-            for i in range(months):
-                # Tenor month indices (on daily grid)
-                tenor_start = int(i * DAYS_PER_MONTH)
-                tenor_end = int((i + 1) * DAYS_PER_MONTH)
+        for i in range(months):
+            tenor_start = int(i * DAYS_PER_MONTH)
+            tenor_end = int((i + 1) * DAYS_PER_MONTH)
 
-                # Settlement window for this month
-                settle_start = tenor_end + 1
-                settle_end = min(tenor_end + SETTLEMENT_WINDOW_STEPS, M)
+            settle_start = tenor_end + 1
+            settle_end = min(tenor_end + SETTLEMENT_WINDOW_STEPS, M)
 
-                if t > settle_end:
-                    # Month fully settled; no exposure from this coupon
-                    continue
+            if t > settle_end:
+                continue
 
-                # -------- Regime 1: averaging period --------
-                if tenor_start <= t < tenor_end:
-                    days_passed = min(t - tenor_start + 1, DAYS_PER_MONTH)
-                    days_remain = max(0.0, DAYS_PER_MONTH - days_passed)
+            # Averaging period
+            if tenor_start <= t < tenor_end:
+                days_passed = min(t - tenor_start + 1, DAYS_PER_MONTH)
+                days_remain = max(0.0, DAYS_PER_MONTH - days_passed)
 
-                    start_idx = max(0, tenor_start)
-                    end_idx = min(t + 1, tenor_end)
-                    p_real = np.mean(S[start_idx:end_idx], axis=0)
+                start_idx = max(0, tenor_start)
+                end_idx = min(t + 1, tenor_end)
+                p_real = np.mean(S[start_idx:end_idx], axis=0)
 
-                    if days_remain > 0:
-                        p_future = S[t] * np.exp(drift * days_remain * DAILY_TIMESTEP)
-                    else:
-                        p_future = S[t]
-
-                    p_final = (p_real * days_passed + p_future * days_remain) / DAYS_PER_MONTH
-
-                    # Discount from expected payment mid‑point in settlement window
-                    pay_step = min((settle_start + settle_end) // 2, M)
-                    t_to_pay = time_pts[pay_step] - time_pts[min(t, M)]
-                    df = np.exp(-rf * t_to_pay)
-
-                    month_pv = (p_final - fixed_prices[i]) * notionals[i] * df
-
-                # -------- Regime 2: settlement window --------
-                elif tenor_end <= t <= settle_end:
-                    # Compute month‑end PV (averaging complete) at tenor_end
-                    start_idx = max(0, tenor_start)
-                    end_idx = min(tenor_end, M)
-                    p_real = np.mean(S[start_idx:end_idx], axis=0)
-
-                    pay_step = min((settle_start + settle_end) // 2, M)
-                    t_to_pay_from_end = time_pts[pay_step] - time_pts[min(tenor_end, M)]
-                    df_end = np.exp(-rf * t_to_pay_from_end)
-
-                    month_pv_at_end = (p_real - fixed_prices[i]) * notionals[i] * df_end
-
-                    # Linearly decay exposure from start to end of settlement window
-                    if settle_end > settle_start:
-                        decay = 1.0 - (t - settle_start) / (settle_end - settle_start)
-                    else:
-                        decay = 0.0
-
-                    decay = max(decay, 0.0)
-                    month_pv = month_pv_at_end * decay
-
-                # -------- Regime 3: pre‑tenor (forward) --------
+                if days_remain > 0:
+                    p_future = S[t] * np.exp(drift * days_remain * DAILY_TIMESTEP)
                 else:
-                    t_to_tenor = time_pts[min(tenor_start, M)] - time_pts[min(t, M)]
-                    p_final = S[min(t, M)] * np.exp(drift * t_to_tenor)
+                    p_future = S[t]
 
-                    pay_step = min((settle_start + settle_end) // 2, M)
-                    t_to_pay = time_pts[pay_step] - time_pts[min(t, M)]
-                    df = np.exp(-rf * t_to_pay)
+                p_final = (p_real * days_passed + p_future * days_remain) / DAYS_PER_MONTH
 
-                    month_pv = (p_final - fixed_prices[i]) * notionals[i] * df
+                pay_step = min((settle_start + settle_end) // 2, M)
+                t_to_pay = time_pts[pay_step] - time_pts[min(t, M)]
+                df = np.exp(-rf * t_to_pay)
 
-                mtm += month_pv
+                month_pv = (p_final - fixed_prices[i]) * notionals[i] * df
 
-            PV_paths[t] = mtm
+            # Settlement window: roll-off
+            elif tenor_end <= t <= settle_end:
+                start_idx = max(0, tenor_start)
+                end_idx = min(tenor_end, M)
+                p_real = np.mean(S[start_idx:end_idx], axis=0)
 
-            if t % 50 == 0:
-                progress_bar.progress(min(50 + int(40 * t / M), 90))
+                pay_step = min((settle_start + settle_end) // 2, M)
+                t_to_pay_from_end = time_pts[pay_step] - time_pts[min(tenor_end, M)]
+                df_end = np.exp(-rf * t_to_pay_from_end)
 
-        # -------------------------------
-        # 3. Exposure statistics
-        # -------------------------------
-        status_text.text("📈 Computing statistics...")
-        progress_bar.progress(95)
+                month_pv_at_end = (p_real - fixed_prices[i]) * notionals[i] * df_end
 
-        exposure = np.maximum(0.0, PV_paths)
-        pfe_95 = np.percentile(exposure, 95, axis=1)
-        pfe_99 = np.percentile(exposure, 99, axis=1)
-        ee = np.mean(exposure, axis=1)
-        neg_95 = np.percentile(PV_paths, 5, axis=1)
-        neg_99 = np.percentile(PV_paths, 1, axis=1)
+                if settle_end > settle_start:
+                    decay = 1.0 - (t - settle_start) / (settle_end - settle_start)
+                else:
+                    decay = 0.0
+                decay = max(decay, 0.0)
 
-        progress_bar.progress(100)
-        status_text.text("✅ Daily simulation complete!")
+                month_pv = month_pv_at_end * decay
 
-        return {
-            "time": time_pts,
-            "time_days": time_days,
-            "pfe_99": pfe_99,
-            "pfe_95": pfe_95,
-            "ee": ee,
-            "neg_99": neg_99,
-            "neg_95": neg_95,
-            "samples": PV_paths[:, : min(10, paths)],
-        }
+            # Pre‑tenor: forward pricing
+            else:
+                t_to_tenor = time_pts[min(tenor_start, M)] - time_pts[min(t, M)]
+                p_final = S[min(t, M)] * np.exp(drift * t_to_tenor)
+
+                pay_step = min((settle_start + settle_end) // 2, M)
+                t_to_pay = time_pts[pay_step] - time_pts[min(t, M)]
+                df = np.exp(-rf * t_to_pay)
+
+                month_pv = (p_final - fixed_prices[i]) * notionals[i] * df
+
+            mtm += month_pv
+
+        PV_paths[t] = mtm
+
+    # -------------------------------
+    # 3. Exposure statistics
+    # -------------------------------
+    exposure = np.maximum(0.0, PV_paths)
+    pfe_95 = np.percentile(exposure, 95, axis=1)
+    pfe_99 = np.percentile(exposure, 99, axis=1)
+    ee = np.mean(exposure, axis=1)
+    neg_95 = np.percentile(PV_paths, 5, axis=1)
+    neg_99 = np.percentile(PV_paths, 1, axis=1)
+
+    # -------------------------------
+    # 4. 2‑day margin equivalents per 1,000 bbl
+    # -------------------------------
+    horizon_steps = 2
+    max_step = M - horizon_steps
+
+    pv_today = PV_paths[: max_step + 1, :]
+    pv_future = PV_paths[horizon_steps : M + 1, :]
+
+    pnl_2d = pv_future - pv_today
+
+    long_loss_2d = -pnl_2d
+    long_margin_2d = np.percentile(long_loss_2d, 99, axis=1)
+
+    short_loss_2d = pnl_2d
+    short_margin_2d = np.percentile(short_loss_2d, 99, axis=1)
+
+    strip_notional_bbl = np.sum(notionals)
+    per_1000_scale = 1000.0 / strip_notional_bbl if strip_notional_bbl > 0 else 0.0
+
+    long_margin_2d_per_1000 = long_margin_2d * per_1000_scale
+    short_margin_2d_per_1000 = short_margin_2d * per_1000_scale
+
+    return {
+        "time": time_pts,
+        "time_days": time_days,
+        "pfe_99": pfe_99,
+        "pfe_95": pfe_95,
+        "ee": ee,
+        "neg_99": neg_99,
+        "neg_95": neg_95,
+        "samples": PV_paths[:, : min(10, paths)],
+        "long_margin_2d_per_1000": long_margin_2d_per_1000,
+        "short_margin_2d_per_1000": short_margin_2d_per_1000,
+    }
+
+# -------------------------------------------------------------
+# Run button
+# -------------------------------------------------------------
+if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=True, key="run_btn"):
+    st.session_state.results = None
+    st.session_state._progress = 0
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    status_text.text("🎲 Running daily Jump-Diffusion Monte Carlo...")
+    progress_bar.progress(5)
 
     results = run_simulation_daily(
         months,
@@ -258,20 +284,27 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
         lambda_jump,
         mean_jump,
         std_jump,
+        use_jumps,
         num_paths,
         time_points,
     )
     st.session_state.results = results
-    time.sleep(0.5)
-    st.rerun()
 
-# ------------------------------------------------------------------
+    progress_bar.progress(100)
+    status_text.text("✅ Simulation complete")
+    time.sleep(0.5)
+    st.experimental_rerun()
+
+# -------------------------------------------------------------
 # Results display
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 if st.session_state.results is not None:
     results = st.session_state.results
 
-    col1, col2, col3, col4 = st.columns(4)
+    long_2d = results["long_margin_2d_per_1000"]
+    short_2d = results["short_margin_2d_per_1000"]
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.metric("Max PFE 99%", f"${np.max(results['pfe_99']) / 1e6:.3f}M")
     with col2:
@@ -280,10 +313,14 @@ if st.session_state.results is not None:
         st.metric("Max EE", f"${np.max(results['ee']) / 1e6:.3f}M")
     with col4:
         st.metric("Max Liability (99%)", f"${np.abs(np.min(results['neg_99'])) / 1e6:.3f}M")
+    with col5:
+        st.metric("2‑Day Long Margin / 1k bbl", f"${np.max(long_2d):.2f}")
+    with col6:
+        st.metric("2‑Day Short Margin / 1k bbl", f"${np.max(short_2d):.2f}")
 
     st.markdown("---")
 
-    # ---------------- Graph 1: Exposure profile ----------------
+    # -------- Graph 1: Exposure profile --------
     fig1, ax1 = plt.subplots(figsize=(16, 6))
     ax1.plot(results["time_days"], results["pfe_99"] / 1e6, "r-", lw=3, label="PFE 99%")
     ax1.plot(results["time_days"], results["pfe_95"] / 1e6, "orange", ls="--", lw=2.5, label="PFE 95%")
@@ -313,7 +350,7 @@ if st.session_state.results is not None:
     ax1.legend()
     st.pyplot(fig1)
 
-    # ---------------- Graph 2: MC paths + centiles ----------------
+    # -------- Graph 2: MC paths + liability centiles --------
     fig2, ax2 = plt.subplots(figsize=(16, 6))
 
     for i in range(results["samples"].shape[1]):
@@ -342,6 +379,7 @@ if st.session_state.results is not None:
     ax2.legend()
     st.pyplot(fig2)
 
+    # CSV download
     df = pd.DataFrame(
         {
             "Business_Days": results["time_days"],
@@ -356,4 +394,4 @@ if st.session_state.results is not None:
     st.download_button("📥 Download CSV", df.to_csv(index=False), "oil_pfe_results.csv")
 
 else:
-    st.info("🚀 **Set parameters and click 'Run Simulation'** to generate daily PFE and MC paths.")
+    st.info("🚀 Set parameters and click **Run Simulation** to generate daily PFE, MC paths and 2‑day margin per 1,000 bbl.")
