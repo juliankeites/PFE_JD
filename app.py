@@ -73,10 +73,10 @@ std_jump = st.sidebar.number_input(
 )
 
 drift_rate = st.sidebar.number_input(
-    "Drift Rate μ", -0.200, 0.200, 0.030, format="%.3f"
+    "Drift Rate μ", -0.200, 0.200, 0.00, format="%.3f"
 )
 risk_free = st.sidebar.number_input(
-    "Risk-Free Rate r", -0.200, 0.200, 0.020, format="%.3f"
+    "Risk-Free Rate r", -0.200, 0.200, 0.00, format="%.3f"
 )
 
 # -------------------------------------------------------------
