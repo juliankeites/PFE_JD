@@ -293,7 +293,7 @@ if st.sidebar.button("🚀 Run Simulation", type="primary", use_container_width=
     progress_bar.progress(100)
     status_text.text("✅ Simulation complete")
     time.sleep(0.5)
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------------------------------------
 # Results display
