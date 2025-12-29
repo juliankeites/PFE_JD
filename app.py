@@ -489,15 +489,13 @@ if st.session_state.results is not None:
     ax2.legend()
     st.pyplot(fig2)
 
-    # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
+        # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
     S_paths = results["S_paths"]  # shape (T_strip+1, N_paths)
 
-    # Build a matching time axis from the strip simulation
+    # Build matching time axis from strip simulation
     T_strip_plus_1 = S_paths.shape[0]
     time_days_strip = np.linspace(
-        0,
-        STRIP_LENGTH_YEARS + DAILY_TIMESTEP,
-        T_strip_plus_1
+        0, STRIP_LENGTH_YEARS + DAILY_TIMESTEP, T_strip_plus_1
     ) * BUSINESS_DAYS_PER_YEAR
 
     Np = S_paths.shape[1]
@@ -506,24 +504,46 @@ if st.session_state.results is not None:
     sample_indices = rng.choice(Np, size=sample_count, replace=False)
 
     S_samples = S_paths[:, sample_indices]
+    
+    # Compute centiles across ALL paths (not just samples)
+    S_p1 = np.percentile(S_paths, 1, axis=1)    # 1st percentile (99% lower tail)
+    S_p5 = np.percentile(S_paths, 5, axis=1)    # 5th percentile (95% lower tail)
+    S_p95 = np.percentile(S_paths, 95, axis=1)  # 95th percentile (95% upper tail)
+    S_p99 = np.percentile(S_paths, 99, axis=1)  # 99th percentile (99% upper tail)
     S_min = np.min(S_paths, axis=1)
     S_max = np.max(S_paths, axis=1)
     S_mean = np.mean(S_paths, axis=1)
 
     fig3, ax3 = plt.subplots(figsize=(16, 6))
-    # Light grey sample paths
+    
+    # Light grey sample paths (background)
     for i in range(sample_count):
-        ax3.plot(time_days_strip, S_samples[:, i], color="gray", alpha=0.25, lw=0.8)
-
-    # Min / max / mean bands
-    ax3.plot(time_days_strip, S_min, color="black", lw=1.0, ls="--", label="Min path")
-    ax3.plot(time_days_strip, S_max, color="black", lw=1.0, ls="--", label="Max path")
-    ax3.plot(time_days_strip, S_mean, color="blue", lw=2.0, label="Average path")
+        ax3.plot(time_days_strip, S_samples[:, i], color="gray", alpha=0.15, lw=0.6)
+    
+    # Centile bands (most prominent)
+    ax3.fill_between(
+        time_days_strip, S_p1, S_p99, 
+        color="red", alpha=0.15, label="1st-99th centile (98% coverage)"
+    )
+    ax3.fill_between(
+        time_days_strip, S_p5, S_p95, 
+        color="orange", alpha=0.25, label="5th-95th centile (90% coverage)"
+    )
+    
+    # Centile lines
+    ax3.plot(time_days_strip, S_p1, color="darkred", lw=1.5, ls="-", alpha=0.8, label="1st centile")
+    ax3.plot(time_days_strip, S_p5, color="orange", lw=1.5, ls="-", alpha=0.8, label="5th centile")
+    ax3.plot(time_days_strip, S_p95, color="orange", lw=1.5, ls="-", alpha=0.8, label="95th centile")
+    ax3.plot(time_days_strip, S_p99, color="darkred", lw=1.5, ls="-", alpha=0.8, label="99th centile")
+    
+    # Min/max/mean (less prominent)
+    ax3.plot(time_days_strip, S_min, color="black", lw=1.0, ls="--", alpha=0.6, label="Min path")
+    ax3.plot(time_days_strip, S_max, color="black", lw=1.0, ls="--", alpha=0.6, label="Max path")
+    ax3.plot(time_days_strip, S_mean, color="blue", lw=2.5, label="Mean path")
 
     ax3.set_title(
-        "Monte Carlo Price Paths (Sample of 100) with Min / Max / Mean",
-        fontsize=16,
-        fontweight="bold",
+        "Monte Carlo Price Paths: 1st/99th & 5th/95th Centiles + Sample Paths",
+        fontsize=16, fontweight="bold"
     )
     ax3.set_xlabel("Business Days")
     ax3.set_ylabel("Price (USD/bbl)")
@@ -531,6 +551,7 @@ if st.session_state.results is not None:
     ax3.ticklabel_format(style="plain", axis="y")
     ax3.legend()
     st.pyplot(fig3)
+
 
     
     # CSV download (exposure stats)
