@@ -512,7 +512,7 @@ if st.session_state.results is not None:
     S_p99 = np.percentile(S_paths, 99, axis=1)  # 99th percentile (99% upper tail)
     S_min = np.min(S_paths, axis=1)
     S_max = np.max(S_paths, axis=1)
-    S_mean = np.mean(S_paths, axis=1)
+    #S_mean = np.mean(S_paths, axis=1)
 
     fig3, ax3 = plt.subplots(figsize=(16, 6))
     
@@ -539,7 +539,7 @@ if st.session_state.results is not None:
     # Min/max/mean (less prominent)
     ax3.plot(time_days_strip, S_min, color="black", lw=1.0, ls="--", alpha=0.6, label="Min path")
     ax3.plot(time_days_strip, S_max, color="black", lw=1.0, ls="--", alpha=0.6, label="Max path")
-    ax3.plot(time_days_strip, S_mean, color="blue", lw=2.5, label="Mean path")
+    #ax3.plot(time_days_strip, S_mean, color="blue", lw=2.5, label="Mean path")
 
     ax3.set_title(
         "Monte Carlo Price Paths: 1st/99th & 5th/95th Centiles + Sample Paths",
