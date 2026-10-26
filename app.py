@@ -39,7 +39,7 @@ num_paths = 500 if quick_mode else st.sidebar.slider("MC Paths", 1000, 10000, 50
 
 st.sidebar.subheader("📈 Monthly Volumes (MT)")
 volumes = []
-default_vol = 12000.0
+default_vol = 38000.0
 for i in range(months):
     vol = st.sidebar.number_input(
         f"M{i+1}",
