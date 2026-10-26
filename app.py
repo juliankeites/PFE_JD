@@ -63,13 +63,13 @@ st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
 use_jumps = st.sidebar.checkbox("Enable Jump-Diffusion", value=True)
 
 lambda_jump = st.sidebar.number_input(
-    "Lambda (Intensity)", 0.000, 5.000, 3.000, format="%.3f"
+    "Lambda (Intensity)", 0.000, 5.000, 1.000, format="%.3f"
 )
 mean_jump = st.sidebar.number_input(
     "Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f"
 )
 std_jump = st.sidebar.number_input(
-    "Jump Std Dev", 0.000, 2.000, 0.400, format="%.3f"
+    "Jump Std Dev", 0.000, 2.000, 0.250, format="%.3f"
 )
 
 drift_rate = st.sidebar.number_input(
