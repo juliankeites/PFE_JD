@@ -55,21 +55,21 @@ volatility = st.sidebar.number_input(
     "Volatility σ (annual)", 0.001, 5.000, 0.300, format="%.3f"
 )
 
-spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 80.0)
-fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 80.0)
+spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 180.0)
+fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 180.0)
 
 st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
 
 use_jumps = st.sidebar.checkbox("Enable Jump-Diffusion", value=True)
 
 lambda_jump = st.sidebar.number_input(
-    "Lambda (Intensity)", 0.000, 5.000, 0.800, format="%.3f"
+    "Lambda (Intensity)", 0.000, 5.000, 3.000, format="%.3f"
 )
 mean_jump = st.sidebar.number_input(
     "Mean Jump Size", -1.000, 1.000, 0.000, format="%.3f"
 )
 std_jump = st.sidebar.number_input(
-    "Jump Std Dev", 0.000, 2.000, 0.200, format="%.3f"
+    "Jump Std Dev", 0.000, 2.000, 0.400, format="%.3f"
 )
 
 drift_rate = st.sidebar.number_input(
