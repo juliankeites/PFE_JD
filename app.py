@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("🛢️ Oil Strip PFE Exposure Simulator")
-st.markdown("**Jump-Diffusion Monte Carlo for Monthly-Average Oil Swaps**")
+st.markdown("**Jump-Diffusion Monte Carlo for Monthly-Average Oil Swaps or EaR**")
 st.markdown("---")
 
 # -------------------------------------------------------------
@@ -52,11 +52,11 @@ for i in range(months):
 
 # Volatility with 3 decimal places
 volatility = st.sidebar.number_input(
-    "Volatility σ (annual)", 0.001, 5.000, 0.300, format="%.3f"
+    "Volatility σ (annual)", 0.001, 5.000, 0.380, format="%.3f"
 )
 
-spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 180.0)
-fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 180.0)
+spot_price = st.sidebar.number_input("Spot ($/bbl)", 1.0, 500.0, 172.0)
+fixed_price = st.sidebar.number_input("Fixed Price ($/bbl)", 1.0, 500.0, 172.0)
 
 st.sidebar.subheader("⚡ Jump-Diffusion Parameters")
 
