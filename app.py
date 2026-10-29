@@ -79,6 +79,14 @@ risk_free = st.sidebar.number_input(
     "Risk-Free Rate r", -0.200, 0.200, 0.00, format="%.3f"
 )
 
+st.sidebar.subheader("🖼️ Chart Options")
+show_liabilities = st.sidebar.checkbox(
+    "Show liability centiles on PV paths chart",
+    value=True,
+    key="show_liabilities",
+)
+
+
 # -------------------------------------------------------------
 # Contract / time grid / settlement profile
 # -------------------------------------------------------------
@@ -439,7 +447,7 @@ if st.session_state.results is not None:
     ax1.legend()
     st.pyplot(fig1)
 
-    # -------- Graph 2: MC PV paths + liability centiles --------
+    # -------- Graph 2: MC PV paths + liability centiles (toggleable) --------
     fig2, ax2 = plt.subplots(figsize=(16, 6))
 
     for i in range(results["samples_PV"].shape[1]):
@@ -451,45 +459,51 @@ if st.session_state.results is not None:
             lw=1,
         )
 
-    ax2.plot(
-        results["time_days"],
-        results["neg_99"] / 1e6,
-        "darkred",
-        lw=4,
-        label="1% Centile (99% Liability)",
-    )
-    ax2.plot(
-        results["time_days"],
-        results["neg_95"] / 1e6,
-        "red",
-        ls="--",
-        lw=3,
-        label="5% Centile (95% Liability)",
-    )
+    if show_liabilities:
+        ax2.plot(
+            results["time_days"],
+            results["neg_99"] / 1e6,
+            "darkred",
+            lw=4,
+            label="1% Centile (99% Liability)",
+        )
+        ax2.plot(
+            results["time_days"],
+            results["neg_95"] / 1e6,
+            "red",
+            ls="--",
+            lw=3,
+            label="5% Centile (95% Liability)",
+        )
+
     ax2.axhline(0, color="k", ls="-", alpha=0.5)
 
-    all_paths = np.concatenate(
-        [
-            results["samples_PV"].flatten() / 1e6,
-            results["neg_99"] / 1e6,
-            results["neg_95"] / 1e6,
-        ]
-    )
+    arrays = [results["samples_PV"].flatten() / 1e6]
+    if show_liabilities:
+        arrays += [results["neg_99"] / 1e6, results["neg_95"] / 1e6]
+    all_paths = np.concatenate(arrays)
+
     py_min, py_max = np.min(all_paths), np.max(all_paths)
     py_pad = (py_max - py_min) * 0.05 if py_max > py_min else 0.001
     ax2.set_ylim(py_min - py_pad, py_max + py_pad)
 
     ax2.set_title(
-        "Monte Carlo PV Paths + Liability Centiles (Daily)", fontsize=16, fontweight="bold"
+        "Monte Carlo PV Paths + Liability Centiles (Daily)"
+        if show_liabilities
+        else "Monte Carlo PV Paths (Daily)",
+        fontsize=16,
+        fontweight="bold",
     )
     ax2.set_xlabel("Business Days")
     ax2.set_ylabel("Mark-to-Market ($ Millions)")
     ax2.ticklabel_format(style="plain", axis="y")
     ax2.grid(True, alpha=0.3)
-    ax2.legend()
+    if show_liabilities:
+        ax2.legend()
     st.pyplot(fig2)
-
-        # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
+    plt.close(fig2)
+    
+    # -------- Graph 3: Monte Carlo price paths (USD/bbl) --------
     S_paths = results["S_paths"]  # shape (T_strip+1, N_paths)
 
     # Build matching time axis from strip simulation
